@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style id="webmakerstyle">
+    </style>
+  </head>
+  <body>
+    <h1>AmiLoop Test</h1>
+    <p>This page uses WebBluetooth to connect and transfer an amiibo dump file.</p>
+    <p><a id="connectDisconnect" href="#">Connect</a></p>
+    <p><a id="uploadTag" href="#">Upload tag data</a></p>
+    <script>
+      /**
+       * Prompts the user to select a file and returns its contents as a Uint8Array.
+       * @returns {Promise<Uint8Array>} A promise that resolves with the file contents as a Uint8Array.
+       * @throws {Error} If no file is selected or if there is an error reading the file.
+       */
+      function promptForFileAndGetContents() {
+        return new Promise((resolve, reject) => {
+          // Create an input element
+          const input = document.createElement('input');
+          input.type = 'file';
+          
+          // Handle file selection
+          input.onchange = (event) => {
+            var _a;
+            const target = event.target;
+            const file = (_a = target.files) === null || _a === void 0 ? void 0 : _a[0];
+            if (file) {
+              const reader = new FileReader();
+              reader.onload = (loadEvent) => {
+                var _a;
+                const result = (_a = loadEvent.target) === null || _a === void 0 ? void 0 : _a.result;
+                if (result instanceof ArrayBuffer) {
+                  resolve(new Uint8Array(result));
+                } else {
+                  reject(new Error('Failed to read file contents.'));
+                }
+              };
+              reader.onerror = () => {
+                reject(new Error('Failed to read file.'));
+              };
+              reader.readAsArrayBuffer(file);
+            } else {
+              reject(new Error('No file selected.'));
+            }
+          };
+          
+          // Trigger file selection
+          input.click();
+        });
+      }
+      
+      /**
+       * Performs bitwise XOR operation on a byte array and returns the result.
+       * @param {Uint8Array} byteArray - The input byte array.
+       * @returns {number} The result of XOR operation.
+       * @throws {Error} If the input byte array is empty.
+       */
+      function xorByteArray(byteArray) {
+        if (!byteArray || byteArray.length === 0) {
+          throw new Error("Empty collection can't be reduced.");
+        }
+        let result = byteArray[0];
+        for (let i = 1; i < byteArray.length; i++) {
+          result ^= byteArray[i];
+        }
+        return result & 0xff;
+      }
+      
+      /**
+       * Processes a Uint8Array by splitting it into chunks and adding header and footer bytes to each chunk.
+       * @param {Uint8Array} input - The input Uint8Array to process.
+       * @returns {Uint8Array[]} An array of processed chunks.
+       */
+      function processUint8Array(input) {
+        const output = [];
+        let start = 0;
+        while (start < input.length) {
+          const chunkSize = Math.min(128, input.length - start);
+          const chunk = input.slice(start, start + chunkSize);
+          const newData = new Uint8Array(5 + chunk.length + 2);
+          newData[0] = 0x02;
+          newData[1] = chunk.length + 3;
+          newData[2] = 0x87;
+          newData[3] = chunk.length < 128 ? 1 : 0;
+          newData[4] = output.length;
+          newData.set(chunk, 5);
+          const xorValue = xorByteArray(newData.slice(1, newData.length - 2));
+          newData[newData.length - 2] = xorValue;
+          newData[newData.length - 1] = 0x03;
+          output.push(newData);
+          start += chunkSize;
+        }
+        return output;
+      }
+      
+      /**
+       * Converts an ArrayBuffer to a hexadecimal string.
+       * @param {ArrayBuffer} buffer - The input ArrayBuffer to convert.
+       * @returns {string} The hexadecimal representation of the input buffer.
+       */
+      function buf2hex(buffer) {
+        return [...new Uint8Array(buffer)]
+          .map(x => (`00${x.toString(16)}`).slice(-2))
+          .join(' ');
+      }
+      
+      async function connectToAmiLoop(onDisconnect, deviceIdentifier) {
+        try {
+          let device;
+      
+          // Check if deviceIdentifier is provided and reconnect if available
+          if (deviceIdentifier && navigator.bluetooth.getDevices) {
+            const devices = await navigator.bluetooth.getDevices();
+            device = devices.find(d => d.id === deviceIdentifier);
+          }
+      
+          // If device not found or deviceIdentifier not provided, perform a new scan
+          if (!device) {
+            device = await navigator.bluetooth.requestDevice({
+              filters: [{
+                name: 'AmiLoop'
+              }],
+              optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e']
+            });
+          }
+          
+          await device.gatt.disconnect();
+      
+          const server = await device.gatt.connect();
+          const service = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
+          const characteristicTX = await service.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
+          const characteristicRX = await service.getCharacteristic('6e400003-b5a3-f393-e0a9-e50e24dcca9e');
+          
+          // Add disconnect event listener
+          device.addEventListener('gattserverdisconnected', () => {
+            if (typeof onDisconnect === 'function') {
+              onDisconnect();
+            }
+          });
+          
+          characteristicRX.addEventListener('characteristicvaluechanged', function(event) {
+            const data = event.target.value;
+            // Handle received data here
+            console.log('Received data:', buf2hex(data.buffer));
+          });
+      
+          await characteristicRX.startNotifications();
+          
+          // Some kind of handshake, maybe?
+          await characteristicTX.writeValueWithResponse(Uint8Array.from([0x02, 0x01, 0x89, 0x88, 0x03]));
+      
+          return {
+            device,
+            service,
+            server,
+            characteristicTX,
+            characteristicRX
+          };
+        } catch (error) {
+          console.error('Error:', error);
+          throw error;
+        }
+      }
+      
+      async function sendDataToAmiLoop(characteristics, data) {
+        try {
+          const { characteristicTX, characteristicRX } = characteristics;
+      
+          for (const byteArray of data) {
+            await characteristicTX.writeValueWithResponse(byteArray);
+            console.log("Wrote data:", buf2hex(byteArray));
+          }
+        } catch (error) {
+          console.error('Error:', error);
+          throw error;
+        }
+      }
+      
+      var amiLoop = null;
+      
+      document.getElementById("connectDisconnect").addEventListener("click", async function(e) {
+        e.preventDefault();
+        
+        if (amiLoop) {
+          await amiLoop.server.disconnect();
+          amiLoop = null;
+          
+          return;
+        }
+        
+        amiLoop = await connectToAmiLoop(() => {
+          amiLoop = null;
+          this.innerText = "Connect";
+        }, this.dataset.previousDevice);
+        this.innerText = "Disconnect"
+      });
+      
+      document.getElementById("uploadTag").addEventListener("click", async function(e) {
+        e.preventDefault();
+        
+        var fileData = await promptForFileAndGetContents();
+        var tagData = new Uint8Array(540);
+        tagData.set(fileData.slice(0, Math.min(540, fileData.length)), 0);
+        tagData[536] = 0x80;
+        tagData[537] = 0x80;
+      
+        var chunkedData = processUint8Array(tagData);
+        await sendDataToAmiLoop(amiLoop, chunkedData); 
+      })
+      //# sourceURL=userscript.js
+    </script>
+  </body>
+</html>
