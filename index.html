@@ -1,9 +1,8 @@
 <!DOCTYPE html>
 <html>
   <head>
+    <title>AmiLoop WebBluetooth</title>
     <meta charset="UTF-8" />
-    <style id="webmakerstyle">
-    </style>
   </head>
   <body>
     <h1>AmiLoop Test</h1>
@@ -11,7 +10,7 @@
     <p><a id="connectDisconnect" href="#">Connect</a></p>
     <div id="connectedStuff" style="display: none;">
       <p><a id="uploadTag" href="#">Upload tag data</a></p>
-      <p><a id="clearTag" href="#">Clear tag data</a></p>
+      <p><a id="clearTag" href="#">>Write blank tag</a></p>
     </div>
     <script>
       /**
@@ -245,7 +244,8 @@
         tagData[537] = 0x80;
       
         var chunkedData = processUint8Array(tagData);
-        await sendDataToAmiLoop(amiLoop, chunkedData); 
+        await sendDataToAmiLoop(amiLoop, chunkedData);
+        alert("Done");
       })
       
       document.getElementById("clearTag").addEventListener("click", async function(e) {
@@ -257,9 +257,9 @@
         tagData[537] = 0x80;
       
         var chunkedData = processUint8Array(tagData);
-        await sendDataToAmiLoop(amiLoop, chunkedData); 
+        await sendDataToAmiLoop(amiLoop, chunkedData);
+        alert("Done");
       })
-      //# sourceURL=userscript.js
     </script>
   </body>
 </html>
