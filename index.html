@@ -5,14 +5,23 @@
     <meta charset="UTF-8" />
   </head>
   <body>
-    <h1>AmiLoop Test</h1>
-    <p>This page uses WebBluetooth to connect and transfer an amiibo dump file.</p>
+    <h1>AmiLoop Management</h1>
+    <p>This page uses WebBluetooth to manage the AmiLoop.</p>
     <p><a id="connectDisconnect" href="#">Connect</a></p>
     <div id="connectedStuff" style="display: none;">
-      <p><a id="uploadTag" href="#">Upload tag data</a></p>
-      <p><a id="clearTag" href="#">>Write blank tag</a></p>
+      <p><strong>Firmware:</strong> <span id="firmware"></span></p>
+      <ul>
+        <li><a id="uploadTag" href="#">Upload tag data</a></li>
+        <li><a id="clearTag" href="#">Write blank tag</a></li>
+        <li><a id="manualMode" href="#">Set manual mode</a></li>
+        <li><a id="sequentialMode" href="#">Set sequential mode</a></li>
+        <li><a id="automaticMode" href="#">Set automatic mode</a></li>
+        <li><a id="resetAmiloop" href="#">Reset AmiLoop</a></li>
+      </ul>
     </div>
     <script>
+      var amiLoop = null;
+
       /**
        * Prompts the user to select a file and returns its contents as a Uint8Array.
        * @returns {Promise<Uint8Array>} A promise that resolves with the file contents as a Uint8Array.
@@ -23,7 +32,7 @@
           // Create an input element
           const input = document.createElement('input');
           input.type = 'file';
-          
+
           // Handle file selection
           input.onchange = (event) => {
             var _a;
@@ -48,12 +57,12 @@
               reject(new Error('No file selected.'));
             }
           };
-          
+
           // Trigger file selection
           input.click();
         });
       }
-      
+
       /**
        * Performs bitwise XOR operation on a byte array and returns the result.
        * @param {Uint8Array} byteArray - The input byte array.
@@ -70,7 +79,7 @@
         }
         return result & 0xff;
       }
-      
+
       /**
        * Processes a Uint8Array by splitting it into chunks and adding header and footer bytes to each chunk.
        * @param {Uint8Array} input - The input Uint8Array to process.
@@ -97,28 +106,39 @@
         }
         return output;
       }
-      
+
       /**
        * Converts an ArrayBuffer to a hexadecimal string.
        * @param {ArrayBuffer} buffer - The input ArrayBuffer to convert.
        * @returns {string} The hexadecimal representation of the input buffer.
        */
-      function buf2hex(buffer) {
-        return [...new Uint8Array(buffer)]
-          .map(x => (`00${x.toString(16)}`).slice(-2))
-          .join(' ');
+       function buf2hex(buffer) {
+        buffer = new Uint8Array(buffer);
+
+        let result = '';
+
+        for (let i = 0; i < buffer.length; i++) {
+          const hex = buffer[i].toString(16).padStart(2, '0');
+          result += hex.toUpperCase() + ' ';
+
+          if ((i + 1) % 8 === 0) {
+            result += '\n';
+          }
+        }
+
+        return result.trim();
       }
-      
+
       async function connectToAmiLoop(onDisconnect, deviceIdentifier) {
         try {
           let device;
-      
+
           // Check if deviceIdentifier is provided and reconnect if available
           if (deviceIdentifier && navigator.bluetooth.getDevices) {
             const devices = await navigator.bluetooth.getDevices();
             device = devices.find(d => d.id === deviceIdentifier);
           }
-      
+
           // If device not found or deviceIdentifier not provided, perform a new scan
           if (!device) {
             device = await navigator.bluetooth.requestDevice({
@@ -128,66 +148,113 @@
               optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e']
             });
           }
-          
+
           await device.gatt.disconnect();
-      
+
           const server = await device.gatt.connect();
           const service = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
           const characteristicTX = await service.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
           const characteristicRX = await service.getCharacteristic('6e400003-b5a3-f393-e0a9-e50e24dcca9e');
-          
+
+
           // Add disconnect event listener
           device.addEventListener('gattserverdisconnected', () => {
             if (typeof onDisconnect === 'function') {
               onDisconnect();
             }
           });
-          
+
           characteristicRX.addEventListener('characteristicvaluechanged', function(event) {
             const data = event.target.value;
             // Handle received data here
-            console.log('Received data:', buf2hex(data.buffer));
+            console.log(`\x1B[1mRead data\x1B[m\n${buf2hex(data.buffer)}`);
           });
-      
+
+
           await characteristicRX.startNotifications();
-          
-          // Some kind of handshake, maybe?
-          await characteristicTX.writeValueWithResponse(Uint8Array.from([0x02, 0x01, 0x89, 0x88, 0x03]));
-      
-          return {
+
+          const characteristics = {
             device,
             service,
             server,
             characteristicTX,
-            characteristicRX
-          };
+            characteristicRX,
+            firmware: undefined
+          }
+
+          // Some kind of handshake, maybe?
+          const handshakeResponse = new Uint8Array((await sendAndWait(characteristics, Uint8Array.from([0x02, 0x01, 0x89, 0x88, 0x03]))).buffer);
+          characteristics.firmware = new TextDecoder().decode(handshakeResponse.slice(3, 3 + handshakeResponse[1]));
+
+          return characteristics;
         } catch (error) {
           console.error('Error:', error);
           throw error;
         }
       }
-      
-      async function sendDataToAmiLoop(characteristics, data) {
+
+      function sendAndWait(characteristics, data) {
+        return new Promise(async (resolve, reject) => {
+          try {
+            const { characteristicTX, characteristicRX } = characteristics;
+
+            function innerResolve(event) {
+              characteristicRX.removeEventListener('characteristicvaluechanged', innerResolve)
+              resolve(event.target.value)
+            }
+
+            characteristicRX.addEventListener('characteristicvaluechanged', innerResolve);
+
+            await characteristicTX.writeValueWithResponse(data);
+          } catch (error) {
+            console.error('Error:', error);
+            reject(error);
+          }
+        })
+      }
+
+      async function sendDataToAmiLoop(characteristics, data, noWait) {
         try {
           const { characteristicTX, characteristicRX } = characteristics;
-      
+
           for (const byteArray of data) {
-            await characteristicTX.writeValueWithResponse(byteArray);
-            console.log("Wrote data:", buf2hex(byteArray));
+            console.log(`\x1B[1mWrite data\x1B[m\n${buf2hex(byteArray)}`);
+
+            if (noWait) {
+              await characteristicTX.writeValueWithResponse(byteArray);
+            } else {
+              await sendAndWait(characteristics, byteArray);
+            }
           }
         } catch (error) {
           console.error('Error:', error);
           throw error;
         }
       }
-      
+
+      async function setModeManual() {
+        await sendDataToAmiLoop(amiLoop, [Uint8Array.from([0x02, 0x02, 0x8a, 0x00, 0x88, 0x03])])
+      }
+
+      async function setModeSequential() {
+        await sendDataToAmiLoop(amiLoop, [Uint8Array.from([0x02, 0x02, 0x8a, 0x01, 0x89, 0x03])])
+      }
+
+      async function setModeAutomatic() {
+        await sendDataToAmiLoop(amiLoop, [Uint8Array.from([0x02, 0x02, 0x8a, 0x02, 0x8a, 0x03])])
+      }
+
+      async function resetAmiLoop() {
+        await sendDataToAmiLoop(amiLoop, [Uint8Array.from([0x12, 0x0d, 0x00, 0x02, 0x01, 0x8f, 0x8e, 0x03])], true)
+      }
+
       /**
        * This function generates and returns a 572-byte array populated with the data of a blank NTAG215 with a random UID.
        * @returns An array with blank NTAG215 data.
        */
       function getBlankNtag() {
         const tag = new Uint8Array(572)
-      
+
         tag[0] = 0x04
         tag[1] = Math.round(Math.random() * 255)
         tag[2] = Math.round(Math.random() * 255)
@@ -197,34 +264,32 @@
         tag[6] = Math.round(Math.random() * 255)
         tag[7] = Math.round(Math.random() * 255)
         tag[8] = tag[4] ^ tag[5] ^ tag[6] ^ tag[7]
-      
+
         tag.set([0x48, 0x00, 0x00, 0xE1, 0x10, 0x3E, 0x00, 0x03, 0x00, 0xFE], 0x09)
         tag.set([0xBD, 0x04, 0x00, 0x00, 0xFF, 0x00, 0x05], 0x20B)
-      
+
         return tag
       }
-      
+
       function onConnected() {
-       document.getElementById("connectedStuff").style.display = ""; 
+       document.getElementById("connectedStuff").style.display = "";
+       document.getElementById("firmware").innerText = amiLoop.firmware.toString();
       }
-      
+
       function onDisconnected() {
-        document.getElementById("connectedStuff").style.display = "none"; 
+        document.getElementById("connectedStuff").style.display = "none";
       }
-      
-      
-      var amiLoop = null;
-      
+
       document.getElementById("connectDisconnect").addEventListener("click", async function(e) {
         e.preventDefault();
-        
+
         if (amiLoop) {
           await amiLoop.server.disconnect();
           amiLoop = null;
-          
+
           return;
         }
-        
+
         amiLoop = await connectToAmiLoop(() => {
           amiLoop = null;
           this.innerText = "Connect";
@@ -233,31 +298,63 @@
         this.innerText = "Disconnect"
         onConnected();
       });
-      
+
       document.getElementById("uploadTag").addEventListener("click", async function(e) {
         e.preventDefault();
-        
+
         var fileData = await promptForFileAndGetContents();
         var tagData = new Uint8Array(540);
         tagData.set(fileData.slice(0, Math.min(540, fileData.length)), 0);
         tagData[536] = 0x80;
         tagData[537] = 0x80;
-      
+
         var chunkedData = processUint8Array(tagData);
         await sendDataToAmiLoop(amiLoop, chunkedData);
         alert("Done");
       })
-      
+
       document.getElementById("clearTag").addEventListener("click", async function(e) {
         e.preventDefault();
-        
+
         var tagData = new Uint8Array(540);
         tagData.set(getBlankNtag().slice(0, 540), 0);
         tagData[536] = 0x80;
         tagData[537] = 0x80;
-      
+
         var chunkedData = processUint8Array(tagData);
         await sendDataToAmiLoop(amiLoop, chunkedData);
+        alert("Done");
+      })
+
+      document.getElementById("manualMode").addEventListener("click", async function(e) {
+        e.preventDefault();
+
+        await setModeManual();
+
+        alert("Done");
+      })
+
+      document.getElementById("sequentialMode").addEventListener("click", async function(e) {
+        e.preventDefault();
+
+        await setModeSequential();
+
+        alert("Done");
+      })
+
+      document.getElementById("automaticMode").addEventListener("click", async function(e) {
+        e.preventDefault();
+
+        await setModeAutomatic();
+
+        alert("Done");
+      })
+
+      document.getElementById("resetAmiloop").addEventListener("click", async function(e) {
+        e.preventDefault();
+
+        await resetAmiLoop();
+
         alert("Done");
       })
     </script>
