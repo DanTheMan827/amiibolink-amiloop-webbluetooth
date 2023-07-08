@@ -73,7 +73,7 @@
         // Loop through the input array and slice 20 bytes at a time
         for (let i = 0; i < workingArray.length; i += 20) {
           const slice = workingArray.slice(i, i + 20);
-          const iteration = Math.floor(i / 20);
+          const iteration = Math.floor(i / 20) + 1;
 
           // Create temporary Uint8Array with required values
           const tempArray = Uint8Array.from([
