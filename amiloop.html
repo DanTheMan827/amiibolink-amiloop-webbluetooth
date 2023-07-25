@@ -3,6 +3,11 @@
   <head>
     <title>AmiLoop WebBluetooth</title>
     <meta charset="UTF-8" />
+    <style type="text/css">
+      body {
+        font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";
+      }
+    </style>
   </head>
   <body>
     <h1>AmiLoop Management</h1>
@@ -20,6 +25,10 @@
       </ul>
     </div>
     <script>
+      var blockerElement = document.createElement("div");
+      blockerElement.style = "background-color: rgba(0, 0, 0, 0.5); align-items: center; justify-content: center; position: fixed; inset: 0px; backdrop-filter: blur(4px); color: white; font-weight: bold; font-size: 2rem; display: none; transition: all 0.3s ease 0s; opacity: 0;";
+      document.body.append(blockerElement);
+
       var amiLoop = null;
 
       /**
@@ -214,10 +223,13 @@
       }
 
       async function sendDataToAmiLoop(characteristics, data, noWait) {
+        let i = 0;
+
         try {
           const { characteristicTX, characteristicRX } = characteristics;
 
           for (const byteArray of data) {
+            blockerElement.innerText = `Sending ${++i} / ${data.length}`;
             console.log(`\x1B[1mWrite data\x1B[m\n${buf2hex(byteArray)}`);
 
             if (noWait) {
@@ -280,6 +292,17 @@
         document.getElementById("connectedStuff").style.display = "none";
       }
 
+      function showBlocker() {
+        blockerElement.innerText = "";
+        blockerElement.style.display = "flex";
+        setTimeout(() => blockerElement.style.opacity = "1.0", 1);
+      }
+
+      function hideBlocker() {
+        blockerElement.style.opacity = 0;
+        setTimeout(() => blockerElement.style.display = "none", 300);
+      }
+
       document.getElementById("connectDisconnect").addEventListener("click", async function(e) {
         e.preventDefault();
 
@@ -309,8 +332,10 @@
         tagData[537] = 0x80;
 
         var chunkedData = processUint8Array(tagData);
+
+        showBlocker();
         await sendDataToAmiLoop(amiLoop, chunkedData);
-        alert("Done");
+        hideBlocker();
       })
 
       document.getElementById("clearTag").addEventListener("click", async function(e) {
@@ -322,40 +347,43 @@
         tagData[537] = 0x80;
 
         var chunkedData = processUint8Array(tagData);
+
+        showBlocker();
         await sendDataToAmiLoop(amiLoop, chunkedData);
-        alert("Done");
+        hideBlocker();
       })
 
       document.getElementById("manualMode").addEventListener("click", async function(e) {
         e.preventDefault();
 
+        showBlocker();
         await setModeManual();
-
-        alert("Done");
+        hideBlocker();
       })
 
       document.getElementById("sequentialMode").addEventListener("click", async function(e) {
         e.preventDefault();
 
+        showBlocker();
         await setModeSequential();
-
-        alert("Done");
+        hideBlocker();
       })
 
       document.getElementById("automaticMode").addEventListener("click", async function(e) {
         e.preventDefault();
 
+        showBlocker();
         await setModeAutomatic();
-
-        alert("Done");
+        hideBlocker();
       })
 
       document.getElementById("resetAmiloop").addEventListener("click", async function(e) {
         e.preventDefault();
 
+        showBlocker();
         await resetAmiLoop();
 
-        alert("Done");
+        hideBlocker();
       })
     </script>
   </body>

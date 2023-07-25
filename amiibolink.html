@@ -3,6 +3,11 @@
   <head>
     <title>AmiiboLink WebBluetooth</title>
     <meta charset="UTF-8" />
+    <style type="text/css">
+      body {
+        font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji";
+      }
+    </style>
   </head>
   <body>
     <h1>AmiiboLink Management</h1>
@@ -12,9 +17,18 @@
       <ul>
         <li><a id="uploadTag" href="#">Upload tag data</a></li>
         <li><a id="clearTag" href="#">Write blank tag</a></li>
+        <li><a id="autoRandom" href="#">Automatic Random</a></li>
+        <li><a id="manualRandom" href="#">Manual Random</a></li>
+        <li><a id="sequential" href="#">Sequential</a></li>
+        <li><a id="factoryReset" href="#">Factory Reset</a></li>
+        <li><a id="info" href="#">Info</a></li>
       </ul>
     </div>
     <script>
+      var blockerElement = document.createElement("div");
+      blockerElement.style = "background-color: rgba(0, 0, 0, 0.5); align-items: center; justify-content: center; position: fixed; inset: 0px; backdrop-filter: blur(4px); color: white; font-weight: bold; font-size: 2rem; display: none; transition: all 0.3s ease 0s; opacity: 0;";
+      document.body.append(blockerElement);
+
       var amiiboLink = null;
 
       /**
@@ -195,11 +209,14 @@
         })
       }
 
-      async function sendDataToAmiboLink(characteristics, data, noWait) {
+      async function sendDataToAmiiboLink(characteristics, data, noWait) {
+        let i = 0;
+
         try {
           const { characteristicTX, characteristicRX } = characteristics;
 
           for (const byteArray of data) {
+            blockerElement.innerText = `Sending ${++i} / ${data.length}`;
             console.log(`\x1B[1mWrite data\x1B[m\n${buf2hex(byteArray)}`);
 
             if (noWait) {
@@ -245,6 +262,17 @@
         document.getElementById("connectedStuff").style.display = "none";
       }
 
+      function showBlocker() {
+        blockerElement.innerText = "";
+        blockerElement.style.display = "flex";
+        setTimeout(() => blockerElement.style.opacity = "1.0", 1);
+      }
+
+      function hideBlocker() {
+        blockerElement.style.opacity = 0;
+        setTimeout(() => blockerElement.style.display = "none", 300);
+      }
+
       document.getElementById("connectDisconnect").addEventListener("click", async function(e) {
         e.preventDefault();
 
@@ -272,8 +300,9 @@
         tagData.set(fileData.slice(0, Math.min(540, fileData.length)), 0);
 
         var chunkedData = processDumpToAmiiboLinkCommands(tagData);
-        await sendDataToAmiboLink(amiiboLink, chunkedData);
-        alert("Done");
+        showBlocker();
+        await sendDataToAmiiboLink(amiiboLink, chunkedData);
+        hideBlocker();
       })
 
       document.getElementById("clearTag").addEventListener("click", async function(e) {
@@ -283,9 +312,51 @@
         tagData.set(getBlankNtag().slice(0, 540), 0);
 
         var chunkedData = processDumpToAmiiboLinkCommands(tagData);
-        await sendDataToAmiboLink(amiiboLink, chunkedData);
-        alert("Done");
+        showBlocker();
+        await sendDataToAmiiboLink(amiiboLink, chunkedData);
+        hideBlocker();
       })
+
+      document.getElementById("autoRandom").addEventListener("click", async function(e) {
+        e.preventDefault();
+
+        showBlocker();
+        await sendDataToAmiiboLink(amiiboLink, [Uint8Array.from([0x00, 0x00, 0x10, 0x03, 0xE3, 0x96, 0x51, 0xEC, 0x07, 0xE7, 0xE5, 0x54, 0x37, 0xB6, 0x13, 0x8E, 0x80, 0xC9, 0xB3, 0x09])]);
+        hideBlocker();
+      });
+
+      document.getElementById("manualRandom").addEventListener("click", async function(e) {
+        e.preventDefault();
+
+        showBlocker();
+        await sendDataToAmiiboLink(amiiboLink, [Uint8Array.from([0x00, 0x00, 0x10, 0x03, 0x34, 0x1F, 0x98, 0xE8, 0x46, 0x19, 0x85, 0x75, 0xE3, 0xD3, 0xE0, 0x42, 0x5D, 0x41, 0x89, 0x42])]);
+        hideBlocker();
+      });
+
+      document.getElementById("sequential").addEventListener("click", async function(e) {
+        e.preventDefault();
+
+        showBlocker();
+        await sendDataToAmiiboLink(amiiboLink, [Uint8Array.from([0x00, 0x00, 0x10, 0x03, 0x2F, 0x25, 0xD8, 0x0C, 0x49, 0x42, 0xC0, 0xD5, 0x0B, 0x0B, 0xC6, 0xDF, 0xCA, 0x60, 0x21, 0xFC])]);
+        hideBlocker();
+      });
+
+      document.getElementById("factoryReset").addEventListener("click", async function(e) {
+        e.preventDefault();
+
+        showBlocker();
+        await sendDataToAmiiboLink(amiiboLink, [Uint8Array.from([0x00, 0x00, 0x10, 0x02, 0xAA, 0x54, 0x54, 0x2B, 0xD5, 0xCC, 0x22, 0x42, 0x36, 0x7D, 0x6D, 0xB2, 0x6A, 0xAC, 0xA6, 0xAC])]);
+        hideBlocker();
+      });
+
+      document.getElementById("info").addEventListener("click", async function(e) {
+        e.preventDefault();
+
+        showBlocker();
+        await sendDataToAmiiboLink(amiiboLink, [Uint8Array.from([0x00, 0x00, 0x10, 0x02, 0x33, 0x53, 0x34, 0xAB, 0x1F, 0xE8, 0xC2, 0x6D, 0xE5, 0x35, 0x27, 0x4B, 0x52, 0xE0, 0x1F, 0x26])]);
+        hideBlocker();
+      });
+
 
     </script>
   </body>
